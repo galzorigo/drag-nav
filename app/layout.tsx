@@ -15,8 +15,8 @@ const openRunde = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "mobile lab",
-  description: "Web-mobile interaction experiments.",
+  title: "Drag Nav",
+  description: "Tap and drag navigation experiment",
 };
 
 export const viewport = {
