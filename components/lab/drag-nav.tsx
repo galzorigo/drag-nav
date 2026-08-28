@@ -61,6 +61,8 @@ export function DragNav() {
   const reduce = useReducedMotion();
 
   const [open, setOpen] = useState(false);
+  // Opened by a tap rather than a press: the menu stays put and you point at a row.
+  const [sticky, setSticky] = useState(false);
   const [target, setTarget] = useState(0);
 
   const pointerIdRef = useRef<number | null>(null);
@@ -105,6 +107,7 @@ export function DragNav() {
   const collapse = useCallback(
     (commit: boolean) => {
       setOpen(false);
+      setSticky(false);
       if (commit) {
         const href = ITEMS[targetRef.current].href;
         if (href !== pathname) router.push(href);
@@ -115,6 +118,10 @@ export function DragNav() {
 
   const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== null) return; // a second finger must not hijack the drag
+    if (sticky) {
+      collapse(false); // it is a plain menu now, so the trigger toggles it shut
+      return;
+    }
     e.currentTarget.setPointerCapture(e.pointerId);
     pointerIdRef.current = e.pointerId;
     startYRef.current = e.clientY;
@@ -142,8 +149,38 @@ export function DragNav() {
     // only a quick release that never left the first row is treated as a tap.
     const tapped =
       targetRef.current === 0 && performance.now() - startedAtRef.current < TAP_MS;
-    collapse(!tapped);
+    if (tapped) {
+      // Leave it open as an ordinary menu, with the highlight resting on the page
+      // you are actually on rather than on whichever row the press began over.
+      const here = Math.max(currentIndex, 0);
+      targetRef.current = here;
+      setTarget(here);
+      offset.set(here * PITCH);
+      setSticky(true);
+      return;
+    }
+    collapse(true);
   };
+
+  const choose = useCallback(
+    (i: number) => {
+      targetRef.current = i;
+      setTarget(i);
+      offset.set(i * PITCH); // the highlight slides over as the menu leaves
+      collapse(true);
+    },
+    [offset, collapse],
+  );
+
+  // Escape has to be on the document: a tap never focuses the trigger.
+  useEffect(() => {
+    if (!sticky) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") collapse(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [sticky, collapse]);
 
   const onPointerCancel = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
@@ -206,6 +243,13 @@ export function DragNav() {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-30">
+      {sticky && (
+        <div
+          aria-hidden
+          className="pointer-events-auto absolute inset-0"
+          onPointerDown={() => collapse(false)}
+        />
+      )}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -263,16 +307,21 @@ export function DragNav() {
                   />
                 )}
                 {ITEMS.map((item, i) => (
-                  <motion.div
+                  <motion.button
                     key={item.href}
+                    type="button"
+                    tabIndex={sticky ? 0 : -1}
+                    onClick={() => choose(i)}
                     initial={reduce ? undefined : { opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ duration: 0.18, delay: i * 0.025, ease: [0.23, 1, 0.32, 1] }}
-                    className="relative flex items-center justify-between px-[12px] text-[14px] font-semibold leading-none tracking-[-0.04em] text-black"
+                    className={`relative flex w-full items-center justify-between rounded-[16px] px-[12px] text-left text-[14px] font-semibold leading-none tracking-[-0.04em] text-black focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-black ${
+                      sticky ? "pointer-events-auto cursor-pointer" : ""
+                    }`}
                     style={{ height: ROW_H, marginBottom: i === LAST ? 0 : ROW_GAP }}
                   >
                     <span>{item.label}</span>
-                  </motion.div>
+                  </motion.button>
                 ))}
               </motion.div>
             </motion.div>
@@ -281,7 +330,7 @@ export function DragNav() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {open && (
+        {open && !sticky && (
           <motion.div
             key="pill"
             className="absolute"
