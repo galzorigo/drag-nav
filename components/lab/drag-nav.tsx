@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { play } from "cuelume";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowVerticalIcon, MoreHorizontalIcon } from "@hugeicons/core-free-icons";
 import {
@@ -38,6 +39,14 @@ const PILL_H = 44;
 const TRIGGER_RIGHT = 18;
 const PILL_RIGHT = TRIGGER_RIGHT + TRIGGER + 24;
 const CARD_RIGHT = PILL_RIGHT + PILL_W + 12;
+
+/* Sound is desktop only. On a real phone the haptic already carries the feedback,
+   and audio nobody asked for is worse than silence — so this reuses the same
+   440px line the stylesheet uses to decide it is a phone. */
+function cue(sound: "press" | "release") {
+  if (window.matchMedia("(max-width: 440px)").matches) return;
+  play(sound);
+}
 
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
@@ -110,6 +119,7 @@ export function DragNav() {
     pointerIdRef.current = e.pointerId;
     startYRef.current = e.clientY;
     startedAtRef.current = performance.now();
+    cue("press");
     expand();
   };
 
@@ -126,6 +136,7 @@ export function DragNav() {
   const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
     pointerIdRef.current = null;
+    cue("release");
     offset.set(targetRef.current * PITCH); // let any rubber-band settle home
     // A fast flick that already reached another row still counts as a choice —
     // only a quick release that never left the first row is treated as a tap.
