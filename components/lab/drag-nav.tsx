@@ -234,7 +234,7 @@ export function DragNav() {
                 {currentIndex >= 0 && (
                   <motion.span
                     aria-hidden
-                    className="absolute rounded-full bg-black"
+                    className="absolute rounded-full bg-black/20"
                     initial={reduce ? { opacity: 0 } : { opacity: 0, filter: "blur(4px)" }}
                     animate={reduce ? { opacity: 1 } : { opacity: 1, filter: "blur(0px)" }}
                     exit={
