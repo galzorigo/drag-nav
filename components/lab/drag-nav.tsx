@@ -27,9 +27,11 @@ const CARD_PAD = 8;
 const CARD_W = 200;
 const CARD_H = CARD_PAD * 2 + ROW_H * 3 + ROW_GAP * 2;
 const TRIGGER = 44;
-/* Release inside this window without having left the first row and it was a tap,
-   not a selection — the menu closes where it stands instead of navigating. */
-const TAP_MS = 140;
+/* Hold this long — or move the finger at all — and the gesture becomes a drag:
+   the arrow pill appears and the card slides out to make room for it. Release
+   sooner and it was a tap, which opens the menu as a plain list. */
+const HOLD_MS = 220;
+const DRAG_SLOP = 4;
 const DOT = 5;
 const PILL_W = 20;
 const PILL_H = 44;
@@ -39,6 +41,9 @@ const PILL_H = 44;
 const TRIGGER_RIGHT = 18;
 const PILL_RIGHT = TRIGGER_RIGHT + TRIGGER + 24;
 const CARD_RIGHT = PILL_RIGHT + PILL_W + 12;
+/* Tapped open there is no pill to clear, so the card sits nearer the trigger. */
+const CARD_RIGHT_TAP = TRIGGER_RIGHT + TRIGGER + 12;
+const CARD_SHIFT = CARD_RIGHT - CARD_RIGHT_TAP;
 
 /* Sound is desktop only. On a real phone the haptic already carries the feedback,
    and audio nobody asked for is worse than silence — so this reuses the same
@@ -63,11 +68,14 @@ export function DragNav() {
   const [open, setOpen] = useState(false);
   // Opened by a tap rather than a press: the menu stays put and you point at a row.
   const [sticky, setSticky] = useState(false);
+  // The gesture has committed to being a drag: pill visible, card slid out.
+  const [holding, setHolding] = useState(false);
   const [target, setTarget] = useState(0);
 
   const pointerIdRef = useRef<number | null>(null);
   const startYRef = useRef(0);
-  const startedAtRef = useRef(0);
+  const holdingRef = useRef(false);
+  const holdTimerRef = useRef<number | null>(null);
   const targetRef = useRef(0);
 
   // One spring drives both the highlight and the arrow pill, so they are
@@ -106,6 +114,10 @@ export function DragNav() {
 
   const collapse = useCallback(
     (commit: boolean) => {
+      if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+      holdingRef.current = false;
+      setHolding(false);
       setOpen(false);
       setSticky(false);
       if (commit) {
@@ -116,6 +128,18 @@ export function DragNav() {
     [pathname, router],
   );
 
+  const clearHoldTimer = useCallback(() => {
+    if (holdTimerRef.current !== null) clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+  }, []);
+
+  const beginHold = useCallback(() => {
+    if (holdingRef.current) return;
+    clearHoldTimer();
+    holdingRef.current = true;
+    setHolding(true);
+  }, [clearHoldTimer]);
+
   const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== null) return; // a second finger must not hijack the drag
     if (sticky) {
@@ -125,13 +149,16 @@ export function DragNav() {
     e.currentTarget.setPointerCapture(e.pointerId);
     pointerIdRef.current = e.pointerId;
     startYRef.current = e.clientY;
-    startedAtRef.current = performance.now();
+    holdingRef.current = false;
+    setHolding(false);
+    holdTimerRef.current = window.setTimeout(beginHold, HOLD_MS);
     cue("press");
     expand();
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
+    if (Math.abs(e.clientY - startYRef.current) > DRAG_SLOP) beginHold();
 
     const travelled = (e.clientY - startYRef.current) / PITCH;
     const index = clamp(Math.round(travelled), 0, LAST);
@@ -143,12 +170,13 @@ export function DragNav() {
   const onPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (pointerIdRef.current !== e.pointerId) return;
     pointerIdRef.current = null;
+    // The finger is gone, so a pending timer must not promote this to a drag.
+    clearHoldTimer();
     cue("release");
-    offset.set(targetRef.current * PITCH); // let any rubber-band settle home
-    // A fast flick that already reached another row still counts as a choice —
-    // only a quick release that never left the first row is treated as a tap.
-    const tapped =
-      targetRef.current === 0 && performance.now() - startedAtRef.current < TAP_MS;
+    // Read the ref, not the state: the hold timer may have fired a frame ago and
+    // this handler would still be closed over the previous render's value.
+    const tapped = !holdingRef.current;
+    if (!tapped) offset.set(targetRef.current * PITCH); // let the rubber-band settle
     if (tapped) {
       // Leave it open as an ordinary menu, with the highlight resting on the page
       // you are actually on rather than on whichever row the press began over.
@@ -255,6 +283,11 @@ export function DragNav() {
           <motion.div
             key="menu"
             className="absolute"
+            // Opens near the trigger and only slides out to clear the pill once
+            // the press has become a drag.
+            initial={{ x: CARD_SHIFT }}
+            animate={{ x: holding ? 0 : CARD_SHIFT }}
+            transition={enter}
             style={{
               top: "calc(var(--chrome-top) + 37px)",
               right: CARD_RIGHT,
@@ -267,7 +300,7 @@ export function DragNav() {
               transition={enter}
               className="z-10 material material-strong relative h-full w-full overflow-hidden rounded-[24px]"
               // Scales out of the trigger, which sits up and to the right of the card.
-              style={{ transformOrigin: "139% 9.4%" }}
+              style={{ transformOrigin: "117% 9.4%" }}
             >
               <motion.div
                 {...content}
@@ -278,6 +311,12 @@ export function DragNav() {
                 <motion.div
                   aria-hidden
                   className="absolute rounded-[16px] bg-black/5"
+                  // Only the drag has a row to point at, so the container arrives
+                  // with the arrow pill and stays away on a tap — where the dot
+                  // alone marks the page you are on.
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: holding ? 1 : 0 }}
+                  transition={enter}
                   style={{
                     top: CARD_PAD,
                     left: CARD_PAD,
@@ -330,7 +369,7 @@ export function DragNav() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {open && !sticky && (
+        {open && holding && (
           <motion.div
             key="pill"
             className="absolute"
